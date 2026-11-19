@@ -29,6 +29,9 @@
 //
 
 #include <algorithm>
+#include <chrono>
+#include <random>
+#include <thread>
 #include <map>
 #include <vector>
 
@@ -47,7 +50,7 @@ namespace junban_api {
     static const char* ST_CANCELED = "canceled";
 
     static const int64_t PEOPLE_MAX = 99;
-    static const int TAKE_RETRY = 5;
+    static const int TAKE_RETRY = 10;
 
     // 営業日（日本時間の 4 時で切り替え）= UTC + 9 時間 - 4 時間 の日付
     static inline int64_t today()
@@ -327,20 +330,28 @@ namespace junban_api {
         std::string token = to_hex(random_bytes(16));
         int64_t day = today();
         const auto tab = test::junban::JunbanTicket{};
-        // 同時に受付した人と同じ番号になったら（一意制約で弾かれたら）振り直す
+        // 番号は「今日の最大 + 1」を 1 本の SQL で決めて入れる（読んでから書くまでに DB との往復を挟まない）。
+        // 値は全部サーバで作った整数・16 進・時刻か、検査済みの整数なので、文字列に埋め込んでよい。
+        // それでも同時に受付した人と同じ番号になったら（一意制約で弾かれたら）、少し待って振り直す
+        std::string sql = "INSERT INTO junban_ticket (tenant_id, biz_day, num, seat_id, people, status, token, created_at) "
+            "SELECT " + std::to_string(t.id) + ", " + std::to_string(day) + ", COALESCE(MAX(num), 0) + 1, " +
+            std::to_string(seat) + ", " + std::to_string(people) + ", '" + ST_WAITING + "', '" + token + "', '" +
+            time_to_db(time(NULL)) + "' FROM junban_ticket WHERE tenant_id = " + std::to_string(t.id) +
+            " AND biz_day = " + std::to_string(day);
+        thread_local std::mt19937 rng{ std::random_device{}() };
         for (int i = 0; i < TAKE_RETRY; i++) {
-            int64_t top = 0;
-            for (const auto& a : db(select(tab.num).from(tab).where(tab.tenantId == t.id and tab.bizDay == day))) {
-                if (a.num.value() > top) top = a.num.value();
-            }
-            int64_t id;
             try {
-                id = (int64_t)db(insert_into(tab).set(tab.tenantId = t.id, tab.bizDay = day, tab.num = top + 1,
-                    tab.seatId = seat, tab.people = people, tab.status = ST_WAITING, tab.token = token,
-                    tab.createdAt = time_to_db(time(NULL))));
+                db.execute(sql);
             }
             catch (const sqlpp::exception&) {
+                std::uniform_int_distribution<int> ms(10, 50);
+                std::this_thread::sleep_for(std::chrono::milliseconds(ms(rng) * (i + 1)));
                 continue;
+            }
+            int64_t id = -1;
+            for (const auto& a : db(select(tab.id).from(tab).where(tab.token == token))) {
+                id = a.id;
+                break;
             }
             json ret = success_with_ticket(db, t.id, id);
             ret["token"] = token;

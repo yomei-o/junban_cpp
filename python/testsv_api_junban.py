@@ -25,10 +25,12 @@
 # C++ 版は cpp/main/testsv_api_junban.h。検査の順番と失敗時の message を揃えてある。
 #
 import datetime
+import random
 import secrets
+import time
 
 from fastapi import APIRouter, Request, Header, Depends
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -65,7 +67,13 @@ ST_SKIPPED = "skipped"
 ST_CANCELED = "canceled"
 
 PEOPLE_MAX = 99
-TAKE_RETRY = 5
+TAKE_RETRY = 10
+
+# 整理券を 1 枚入れる。num は同じ店・同じ営業日の最大 + 1（まだ無ければ 1）
+TAKE_SQL = text(
+    "INSERT INTO junban_ticket (tenant_id, biz_day, num, seat_id, people, status, token, created_at) "
+    "SELECT :tid, :day, COALESCE(MAX(num), 0) + 1, :seat, :people, :status, :token, :now "
+    "FROM junban_ticket WHERE tenant_id = :tid AND biz_day = :day")
 
 
 def init_junban():
@@ -223,17 +231,19 @@ def junban_take(db: Session, skey: str, body: dict) -> dict:
         raise PasskeyError("unknown seat")
     token = secrets.token_hex(16)
     day = today()
-    # 同時に受付した人と同じ番号になったら（一意制約で弾かれたら）振り直す
-    for _ in range(TAKE_RETRY):
-        top = db.query(func.max(Ticket.num)).filter(Ticket.tenant_id == t.id, Ticket.biz_day == day).scalar()
-        x = Ticket(tenant_id=t.id, biz_day=day, num=(top or 0) + 1, seat_id=seat, people=people,
-                   status=ST_WAITING, token=token, created_at=utcnow())
-        db.add(x)
+    now = utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    # 番号は「今日の最大 + 1」を 1 本の SQL で決めて入れる（読んでから書くまでに DB との往復を挟まない）。
+    # それでも同時に受付した人と同じ番号になったら（一意制約で弾かれたら）、少し待って振り直す
+    for i in range(TAKE_RETRY):
         try:
+            db.execute(TAKE_SQL, {"tid": t.id, "day": day, "seat": seat, "people": people,
+                                  "status": ST_WAITING, "token": token, "now": now})
             db.commit()
         except IntegrityError:
             db.rollback()
+            time.sleep(random.uniform(0.01, 0.05) * (i + 1))
             continue
+        x = db.query(Ticket).filter(Ticket.token == token).first()
         return {"status": "success", "token": token, "ticket": ticket_to_dict(x, seat_names(db, t.id))}
     raise PasskeyError("busy")
 
