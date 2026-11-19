@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>順番待ちの受付</title>
+<link rel="stylesheet" href="junban.css">
+</head>
+<body>
+<main>
+  <h1 id="storeName">読み込み中…</h1>
+  <div class="row" style="margin-top:4px">
+    <span id="accepting" class="pill"></span>
+    <span id="waitingAll" class="muted"></span>
+  </div>
+
+  <div id="mine" class="card hidden">
+    <b>この端末で取った整理券があります</b>
+    <div class="row"><a id="mineLink" href="#">整理券 <span id="mineNo"></span> の画面を開く</a></div>
+  </div>
+
+  <div id="form" class="hidden">
+    <div id="seatCard" class="card hidden">
+      <h2>席の種類</h2>
+      <div id="seats" class="choices"></div>
+    </div>
+
+    <div class="card">
+      <h2>人数</h2>
+      <div class="stepper">
+        <button id="minus" aria-label="1 人減らす">−</button>
+        <span class="n"><span id="people">2</span></span><span>名</span>
+        <button id="plus" aria-label="1 人増やす">＋</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <button id="take" class="primary big">順番待ちに並ぶ</button>
+      <div id="msg" class="msg"></div>
+      <p class="note">並んだあとに出る画面で、呼ばれるまでの組数がわかります。</p>
+    </div>
+  </div>
+
+  <div id="closed" class="card hidden">
+    <b>いまは受付を止めています。</b>
+    <p class="note">お店の方にお声がけください。</p>
+  </div>
+  <div id="loadMsg" class="msg"></div>
+</main>
+
+<script src="junban.js"></script>
+<script>
+"use strict";
+
+const TENANT = PARAMS.get("tenant") || "";
+let store = null;
+let seat = null;      // 選んでいる席の id（席の種類がない店は 0）
+let people = 2;
+
+function setPeople(n) {
+  people = Math.min(99, Math.max(1, n));
+  $("people").textContent = people;
+}
+$("minus").onclick = () => setPeople(people - 1);
+$("plus").onclick = () => setPeople(people + 1);
+setPeople(2);
+
+async function refresh() {
+  if (!TENANT) {
+    $("storeName").textContent = "お店の URL が正しくありません";
+    return;
+  }
+  const r = await api("store", { tenant: TENANT });
+  if (r.status !== "success") {
+    if (!store) $("storeName").textContent = "順番待ち";
+    showMsg("loadMsg", msgOf(r), "err");
+    return;
+  }
+  showMsg("loadMsg", "");
+  store = r.store;
+  document.title = store.name + " の順番待ち";
+  $("storeName").textContent = store.name;
+  $("accepting").textContent = store.accepting ? "受付中" : "受付停止中";
+  $("accepting").className = "pill " + (store.accepting ? "on" : "off");
+  $("waitingAll").textContent = "いま " + store.waiting + " 組待ち";
+  $("form").classList.toggle("hidden", !store.accepting);
+  $("closed").classList.toggle("hidden", store.accepting);
+
+  const seats = store.seats;
+  $("seatCard").classList.toggle("hidden", seats.length === 0);
+  if (seats.length === 0) seat = 0;
+  else if (!seats.some((s) => s.seat === seat)) seat = seats[0].seat;
+  drawSeats();
+}
+
+// 席の選択肢。選び直しはサーバに聞かずに描き直す
+function drawSeats() {
+  const seats = store.seats;
+  render($("seats"), JSON.stringify([seats, seat]), () => {
+    for (const s of seats) {
+      $("seats").append(el("button", {
+        class: "choice" + (s.seat === seat ? " sel" : ""),
+        onclick: () => { seat = s.seat; drawSeats(); },
+      }, el("b", { text: s.name }), el("span", { class: "muted", text: "待ち " + s.waiting + " 組" })));
+    }
+  });
+}
+
+// この端末で今日取った整理券がまだ有効なら、その画面へのリンクを出す
+async function checkMine() {
+  const t = savedTicket(TENANT);
+  if (!t) return;
+  const r = await api("ticket", { token: t });
+  const ok = r.status === "success" && r.today && (r.ticket.status === "waiting" || r.ticket.status === "called");
+  $("mine").classList.toggle("hidden", !ok);
+  if (ok) {
+    $("mineNo").textContent = r.ticket.number + " 番";
+    $("mineLink").href = "ticket.html?t=" + encodeURIComponent(t);
+  }
+}
+
+$("take").onclick = async () => {
+  $("take").disabled = true;
+  showMsg("msg", "受付しています…");
+  const r = await api("take", { tenant: TENANT, seat: seat == null ? 0 : seat, people });
+  if (r.status !== "success") {
+    $("take").disabled = false;
+    showMsg("msg", msgOf(r), "err");
+    refresh();
+    return;
+  }
+  saveTicket(TENANT, r.token);
+  location.href = "ticket.html?t=" + encodeURIComponent(r.token) + "&new=1";
+};
+
+refresh();
+checkMine();
+poll(refresh, 10000);
+</script>
+</body>
+</html>

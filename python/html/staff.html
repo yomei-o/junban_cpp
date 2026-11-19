@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>順番待ちの管理</title>
+<link rel="stylesheet" href="junban.css">
+</head>
+<body>
+<main class="wide">
+  <div class="row" style="justify-content:space-between;margin-top:0">
+    <h1 id="storeName">順番待ちの管理</h1>
+    <a id="toIndex" href="index.html">ログイン・メンバーの画面</a>
+  </div>
+
+  <div id="denied" class="card hidden">
+    <b id="deniedText"></b>
+    <p class="note">店員の画面は、このお店のメンバーとしてパスキーでログインした人だけが使えます。</p>
+    <div class="row"><a id="loginLink" href="index.html">ログイン・参加申請の画面へ</a></div>
+  </div>
+
+  <div id="body" class="hidden">
+    <div class="card">
+      <div class="row" style="margin-top:0;justify-content:space-between">
+        <div class="row" style="margin-top:0">
+          <button id="accepting" class="toggle" aria-label="受付の開始・停止"></button>
+          <b id="acceptingText"></b>
+          <span id="summary" class="muted"></span>
+        </div>
+        <div class="row" style="margin-top:0">
+          <button id="qrToggle">受付の QR コード</button>
+          <a id="takeLink" href="#" target="_blank">受付ページ</a>
+        </div>
+      </div>
+      <div id="qr" class="hidden"></div>
+    </div>
+
+    <div class="card">
+      <h2>呼出中</h2>
+      <div id="called"></div>
+    </div>
+
+    <div id="cols" class="cols" style="margin-top:14px"></div>
+
+    <div class="card">
+      <details>
+        <summary id="doneSummary">終わった整理券</summary>
+        <div id="done"></div>
+      </details>
+    </div>
+
+    <div id="seatAdmin" class="card hidden">
+      <h2>席の種類（管理者だけ）</h2>
+      <div id="seatList"></div>
+      <div class="row">
+        <input type="text" id="seatNew" placeholder="例: カウンター">
+        <button id="seatAdd">追加</button>
+      </div>
+      <p class="note">席の種類が 1 つもないときは、全員が 1 列に並びます。消した席に並んでいた人は「席の指定なし」に出ます。</p>
+    </div>
+    <div id="msg" class="msg"></div>
+  </div>
+</main>
+
+<script src="qr.js"></script>
+<script src="junban.js"></script>
+<script>
+"use strict";
+
+const TENANT = PARAMS.get("tenant") || "";
+const LABEL = { waiting: "待ち", called: "呼出中", seated: "案内済み", skipped: "不在", canceled: "取消" };
+let q = null;          // /api/junban/v0/queue の結果
+let qrOpen = false;
+
+$("loginLink").href = "index.html?tenant=" + encodeURIComponent(TENANT);
+$("toIndex").href = "index.html?tenant=" + encodeURIComponent(TENANT);
+const TAKE_URL = new URL("take.html?tenant=" + encodeURIComponent(TENANT), location.href).href;
+$("takeLink").href = TAKE_URL;
+
+async function act(path, body, okText) {
+  const r = await api(path, Object.assign({ tenant: TENANT }, body), true);
+  if (r.status !== "success") showMsg("msg", msgOf(r), "err");
+  else showMsg("msg", okText || "", "ok");
+  await refresh();
+  return r;
+}
+
+function ticketLine(t, buttons, cls) {
+  const who = (t.seat_name ? t.seat_name + "・" : "") + t.people + " 名";
+  let when = hhmm(t.created_at) + " 受付";
+  if (t.status === "called") when += "・呼出 " + minutesAgo(t.called_at) + " 分前";
+  return el("div", { class: "item" + (cls ? " " + cls : "") },
+    el("div", {}, el("span", { class: "no", text: t.number }), el("span", { text: who }),
+      el("div", { class: "meta", text: when + (t.status !== "waiting" && t.status !== "called" ? "・" + LABEL[t.status] : "") })),
+    el("div", { class: "row" }, ...buttons));
+}
+
+function draw() {
+  const tickets = q.tickets;
+  const activeSeats = q.seats.filter((s) => s.active);
+  const waiting = tickets.filter((t) => t.status === "waiting");
+  const called = tickets.filter((t) => t.status === "called");
+  const done = tickets.filter((t) => t.status !== "waiting" && t.status !== "called");
+
+  $("storeName").textContent = q.name + " の順番待ち";
+  document.title = "管理: " + q.name;
+  $("accepting").className = "toggle" + (q.accepting ? " on" : "");
+  $("acceptingText").textContent = q.accepting ? "受付中" : "受付停止中";
+  $("summary").textContent = "待ち " + waiting.length + " 組・今日の受付 " + tickets.length + " 枚";
+
+  // 分単位の経過時間も変わるので、分が変わったら描き直す
+  const minute = Math.floor(Date.now() / 60000);
+
+  render($("called"), JSON.stringify([called, minute]), () => {
+    if (!called.length) $("called").append(el("p", { class: "note", text: "いま呼んでいる人はいません。" }));
+    for (const t of called) {
+      $("called").append(ticketLine(t, [
+        el("button", { class: "primary", text: "案内済み", onclick: () => act("set_status", { number: t.number, status: "seated" }) }),
+        el("button", { text: "不在", onclick: () => act("set_status", { number: t.number, status: "skipped" }) }),
+        el("button", { text: "待ちに戻す", onclick: () => act("set_status", { number: t.number, status: "waiting" }) }),
+      ], "called"));
+    }
+  });
+
+  // 列: 席の種類ごと。席の種類がない店・消した席に並んでいる人は「席の指定なし」
+  const cols = activeSeats.map((s) => ({ seat: s.seat, name: s.name }));
+  const known = new Set(cols.map((c) => c.seat));
+  const orphan = waiting.filter((t) => !known.has(t.seat));
+  if (!cols.length || orphan.length) cols.push({ seat: 0, name: "席の指定なし", orphan: true });
+
+  render($("cols"), JSON.stringify([cols, waiting]), () => {
+    for (const c of cols) {
+      const list = c.orphan ? waiting.filter((t) => !known.has(t.seat)) : waiting.filter((t) => t.seat === c.seat);
+      const card = el("div", { class: "card" });
+      const head = el("div", { class: "row", style: "margin-top:0;justify-content:space-between" },
+        el("h2", { style: "margin:0", text: c.name + "　待ち " + list.length + " 組" }));
+      // 「次を呼ぶ」はその列の先頭。消した席の人は番号ごとに呼ぶ
+      if (!c.orphan || !activeSeats.length) {
+        const b = el("button", { class: "call", text: "次を呼ぶ", onclick: () => act("call", { seat: c.seat }, "") });
+        if (!list.length) b.disabled = true;
+        head.append(b);
+      }
+      card.append(head);
+      if (!list.length) card.append(el("p", { class: "note", text: "待っている人はいません。" }));
+      for (const t of list) {
+        card.append(ticketLine(t, [
+          el("button", { text: "呼ぶ", onclick: () => act("set_status", { number: t.number, status: "called" }) }),
+        ]));
+      }
+      $("cols").append(card);
+    }
+  });
+
+  $("doneSummary").textContent = "終わった整理券（" + done.length + " 枚）";
+  render($("done"), JSON.stringify(done), () => {
+    for (const t of done.slice().reverse()) {
+      const btns = [];
+      if (t.status === "skipped" || t.status === "seated") {
+        btns.push(el("button", { text: "待ちに戻す", onclick: () => act("set_status", { number: t.number, status: "waiting" }) }));
+        btns.push(el("button", { text: "呼ぶ", onclick: () => act("set_status", { number: t.number, status: "called" }) }));
+      }
+      $("done").append(ticketLine(t, btns));
+    }
+  });
+
+  $("seatAdmin").classList.toggle("hidden", q.my_role !== "admin");
+  render($("seatList"), JSON.stringify([activeSeats, q.my_role]), () => {
+    if (!activeSeats.length) $("seatList").append(el("p", { class: "note", text: "席の種類はまだありません。" }));
+    for (const s of activeSeats) {
+      $("seatList").append(el("div", { class: "item" }, el("b", { text: s.name }),
+        el("div", { class: "row" },
+          el("button", { text: "名前を変える", onclick: () => renameSeat(s) }),
+          el("button", { class: "danger", text: "消す", onclick: () => deleteSeat(s) }))));
+    }
+  });
+}
+
+async function refresh() {
+  if (!TENANT) {
+    $("denied").classList.remove("hidden");
+    $("deniedText").textContent = "お店の URL が正しくありません（?tenant= が必要です）";
+    return;
+  }
+  const r = await api("queue", { tenant: TENANT }, true);
+  if (r.status !== "success") {
+    const denied = ["not logged in", "tenant member only", "unknown tenant"].includes(r.message);
+    if (denied || !q) {
+      $("denied").classList.remove("hidden");
+      $("body").classList.add("hidden");
+      $("deniedText").textContent = msgOf(r);
+    } else {
+      showMsg("msg", msgOf(r), "err");
+    }
+    return;
+  }
+  q = r;
+  $("denied").classList.add("hidden");
+  $("body").classList.remove("hidden");
+  draw();
+}
+
+$("accepting").onclick = () => act("accepting", { on: !q.accepting }, q.accepting ? "受付を止めました" : "受付を始めました");
+
+$("qrToggle").onclick = () => {
+  qrOpen = !qrOpen;
+  const box = $("qr");
+  box.classList.toggle("hidden", !qrOpen);
+  $("qrToggle").textContent = qrOpen ? "QR コードを閉じる" : "受付の QR コード";
+  if (qrOpen && !box.childElementCount) {
+    const wrap = el("div", { class: "qr-box" });
+    const info = el("div", { class: "meta" }, el("div", { text: TAKE_URL }),
+      el("div", { class: "note", text: "店頭に貼る QR コードです。お客さんはこれを読んで並びます。" }));
+    wrap.append(info);
+    box.append(wrap);
+    QR.svg(TAKE_URL, { size: 200 }).then((svg) => wrap.prepend(svg))
+      .catch((e) => info.prepend(el("div", { class: "msg err", text: "QR コードを作れません: " + e.message })));
+  }
+};
+
+$("seatAdd").onclick = async () => {
+  const name = $("seatNew").value.trim();
+  const r = await act("seat_add", { name }, "「" + name + "」を追加しました");
+  if (r.status === "success") $("seatNew").value = "";
+};
+$("seatNew").addEventListener("keydown", (e) => { if (e.key === "Enter") $("seatAdd").click(); });
+
+async function renameSeat(s) {
+  const name = prompt("「" + s.name + "」の新しい名前", s.name);
+  if (name == null || name.trim() === s.name) return;
+  await act("seat_rename", { seat: s.seat, name: name.trim() }, "名前を変えました");
+}
+async function deleteSeat(s) {
+  if (!confirm("席の種類「" + s.name + "」を消しますか？")) return;
+  await act("seat_delete", { seat: s.seat }, "「" + s.name + "」を消しました");
+}
+
+refresh();
+poll(refresh, 3000);
+</script>
+</body>
+</html>

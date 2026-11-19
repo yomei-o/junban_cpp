@@ -1,23 +1,55 @@
-# render_parity_cpp
+# junban_cpp — お店の順番待ち（整理券）
 
-パスキー（WebAuthn）サーバの軽量サンプルを、**同じ API を FastAPI(Python) と cpp-httplib(C++) の
-両方**で実装し、**Render.com** にデプロイするための入れ物。DB は **TiDB Cloud（MySQL 互換）** を予定。
-
-元サンプル: [yomei-o/passkey_server_cpp](https://github.com/yomei-o/passkey_server_cpp) の `src/server_sample`。
+お店の順番待ちをブラウザだけで回す Web アプリ。**同じ API を FastAPI(Python) と cpp-httplib(C++) の
+両方**で実装し、**Render.com**（無料枠）＋ **TiDB Cloud** で動かす。
+土台は [yomei-o/render_parity_cpp](https://github.com/yomei-o/render_parity_cpp)（パスキーのログインとテナント）。
 Python/C++ の**機能パリティ**を保つのが方針（速度は別）。
+
+## 使い方
+
+| 誰が | ページ | やること |
+|---|---|---|
+| お店の人 | `/html/index.html` | パスキーでログイン。全体の管理者がお店（テナント）を作り、URL を店員に渡す。店員はその URL から参加申請 |
+| 店員 | `/html/staff.html?tenant=<guid>` | 受付の開始・停止、席の種類ごとに「次を呼ぶ」、案内済み・不在・待ちに戻す、受付の QR コード |
+| お客さん | `/html/take.html?tenant=<guid>` | 店頭の QR を読む → 席の種類と人数を選んで並ぶ（ログイン不要） |
+| お客さん | `/html/ticket.html?t=<token>` | 自分の番号、「あと◯組」、呼出中の番号。開いたままにすると呼ばれたときに音と振動 |
+
+- 番号は店ごと・営業日ごと（日本時間 4 時で切り替え）に 1 から、席の種類をまたいだ通し番号。
+- 同時に受付しても番号は重ならない（`(tenant_id, biz_day, num)` の一意制約＋振り直し）。
+- 席の種類が 1 つもない店は全員 1 列。
+- 呼ばれたことの通知は、待ち画面が数秒おきに問い合わせる方式（Web Push・LINE・SMS は使わない）。
+
+## API（`/api/junban/v0/`、すべて POST・JSON）
+
+| API | 誰が | 引数 |
+|---|---|---|
+| `store` | 誰でも | `tenant` |
+| `take` | 誰でも | `tenant, seat, people` → `token` |
+| `ticket` / `cancel` | 誰でも（token を持つ人） | `token` |
+| `queue` / `call` / `set_status` / `accepting` | そのお店の承認済みメンバー | `tenant` ＋ `seat` / `number, status` / `on` |
+| `seat_add` / `seat_rename` / `seat_delete` | そのお店の管理者 | `tenant` ＋ `name` / `seat` |
+
+詳しくは `python/testsv_api_junban.py` と `cpp/main/testsv_api_junban.h` の先頭。ログイン・テナントの API
+（`/api/passkey/v0/` `/api/account/v0/` `/api/tenant/v0/`）は render_parity_cpp のまま。
+
+### 両実装が同じ応答を返すかの検査
+
+`tools/junban_check.py` は SQLite で動かしたサーバに同じ手順（54 手順＋同時受付 12 件）を流し、
+応答を正規化して出す。Python 版と C++ 版の出力を `diff` して一致を確かめる（2026-11-19 一致）。
 
 ## 構成
 
 ```
-render.yaml       Render Blueprint（python と cpp の2サービス）
+render.yaml       Render Blueprint（junban-python と junban-cpp の2サービス）
 cpp/              cpp-httplib 実装（httplib + 自作mbedtls + sqlpp11 + sqlite3 同梱）
   main/           lambda_server.cpp（エントリ）, API(testsv_api_*), httplib/json
   include/        mbedtls（mbedtlspp 経由でユニティ include）
   sqlite/ sqlpp11/ mysql_8_4/ postgre_17/ models/ gen/ date/
-  html/           index.html, qr.js/qr.wasm（静的配信 /html）
+  html/           index.html（ログイン）, take/ticket/staff.html（順番待ち）, junban.js/css, qr.js/qr.wasm
+                  （python/html と同じ中身。片方を直したらコピーする）
   Dockerfile      Render 用（既定 SQLite ビルド。TiDB/MySQL への切替はコメント参照）
 python/           FastAPI 実装
-  lambda_server.py  app（passkey/tenant ルータを /api 配下、/html 配信、/ は redirect）
+  lambda_server.py  app（passkey/tenant/junban ルータを /api 配下、/html 配信、/ は redirect）
   database.py       既定 SQLite / env で MySQL(TiDB) / DATABASE_URL 優先
   requirements.txt
 ```
@@ -66,8 +98,8 @@ POST=8080 ./x64/Release/sqlpp11_cust.exe        # http://localhost:8080/html/ind
 
 **C++ — Linux/Docker**
 ```sh
-cd cpp && docker build -t parity-cpp . && docker run -e PORT=8080 -p 8080:8080 \
-  -e RDS_PROXY_HOST=... -e TIDB_PORT=4000 -e USER_NAME=... -e PASSWORD=... -e DB_NAME=test parity-cpp
+cd cpp && docker build -t junban-cpp . && docker run -e PORT=8080 -p 8080:8080 \
+  -e RDS_PROXY_HOST=... -e TIDB_PORT=4000 -e USER_NAME=... -e PASSWORD=... -e DB_NAME=test junban-cpp
 ```
 
 ## Render へのデプロイ
@@ -80,7 +112,7 @@ cd cpp && docker build -t parity-cpp . && docker run -e PORT=8080 -p 8080:8080 \
 
 無料枠は 15 分無アクセスでスピンダウン・起動約1分・**ディスク揮発**（永続化は TiDB へ）。
 
-## TiDB Cloud（予定）
+## TiDB Cloud
 
 - Serverless（MySQL 互換・**TLS 必須**・port 4000）。接続情報は **env で注入し、リポジトリに秘密を置かない**（`secrets/` は gitignore 済み）。
 - Python: `PyMySQL`（TLS 引数が要る）。C++: `USE_MYSQL` ビルド＋`libmysqlclient`（`cpp/Dockerfile` 末尾コメント）。

@@ -1,6 +1,7 @@
 ﻿
 #define ENABLE_API_PASSKEY 1
 #define ENABLE_API_TENANT 1
+#define ENABLE_API_JUNBAN 1
 
 
 #include "lambda_server.h"
@@ -11,6 +12,10 @@
 
 #ifdef ENABLE_API_TENANT
 #include "testsv_api_tenant.h"
+#endif
+
+#ifdef ENABLE_API_JUNBAN
+#include "testsv_api_junban.h"
 #endif
 
 
@@ -42,6 +47,10 @@ int main()
 
 #ifdef ENABLE_API_TENANT
 	tenant_api::init_api_tenant(svr);
+#endif
+
+#ifdef ENABLE_API_JUNBAN
+	junban_api::init_api_junban(svr);
 #endif
 
 	fprintf(stderr,"http server started port=%d\n",port);

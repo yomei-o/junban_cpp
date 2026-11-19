@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>パスキー デモ</title>
+<title>順番待ち junban（ログイン）</title>
 <style>
   :root {
     --bg: #f6f7f9; --card: #ffffff; --fg: #1d2330; --muted: #6b7280; --line: #e3e6eb;
@@ -108,7 +108,7 @@
 <body>
 <main>
   <header>
-    <h1><a href="index.html">パスキー デモ</a></h1>
+    <h1><a href="index.html">順番待ち junban</a></h1>
     <div class="who" id="who">ログインしていません</div>
   </header>
   <p class="lead">
@@ -520,17 +520,13 @@ async function refreshTenant(quiet) {
       return;
     }
     $("tenantCard").classList.remove("pending");
-    const toggle = el("button", { class: "toggle" + (t.on ? " on" : ""), id: "toggle", "aria-label": "スイッチ",
-      "aria-pressed": t.on ? "true" : "false", onclick: toggleLight });
+    // 店（テナント）のメンバーは順番待ちの管理画面へ
+    const q = "?tenant=" + encodeURIComponent(t.tenant);
     body.append(
-      el("div", { class: "light" },
-        el("div", { class: "bulb" + (t.on ? " on" : ""), id: "bulb", "aria-hidden": "true" }),
-        el("div", {},
-          el("div", { class: "state", id: "state", text: t.on ? "ついています" : "消えています" }),
-          el("div", { class: "note", id: "lastBy", text: t.updated_by
-            ? "最後に切り替えた人: " + t.updated_by + "（" + utcToLocal(t.updated_at) + "）" : "まだ誰も触っていません" }),
-          el("div", { class: "row" }, toggle,
-            el("span", { class: "note", text: "あなたはこのテナントの" + ROLE_LABEL[t.my_role] + " ・ メンバー " + t.member_count + " 人" })))),
+      el("div", { class: "row" },
+        el("a", { href: "staff.html" + q, text: "順番待ちの管理画面を開く", style: "font-weight:700;font-size:1.1rem" }),
+        el("a", { href: "take.html" + q, target: "_blank", text: "お客さんの受付ページ" })),
+      el("p", { class: "note", text: "あなたはこのお店の" + ROLE_LABEL[t.my_role] + " ・ メンバー " + t.member_count + " 人" }),
       el("div", { class: "row" }, el("button", { text: "このテナントを抜ける", onclick: leaveTenant })));
   });
   $("tenantCard").classList.toggle("pending", !!me && t.my_status === "pending");

@@ -1,0 +1,92 @@
+/* 順番待ちのページ（take / ticket / staff）共通。色は index.html と同じ */
+:root {
+  --bg: #f6f7f9; --card: #ffffff; --fg: #1d2330; --muted: #6b7280; --line: #e3e6eb;
+  --accent: #2563eb; --accent-fg: #ffffff; --danger: #dc2626; --ok: #15803d;
+  --call: #f59e0b; --call-fg: #1d2330; --soft: #eef2ff;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12151b; --card: #1b2028; --fg: #e6e9ef; --muted: #9aa3b2; --line: #2c333e;
+    --accent: #5b8cff; --accent-fg: #0b1020; --danger: #f87171; --ok: #4ade80;
+    --call: #fbbf24; --call-fg: #12151b; --soft: #1f2a44;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+  line-height: 1.6;
+}
+main { max-width: 560px; margin: 0 auto; padding: 20px 16px 64px; }
+main.wide { max-width: 1100px; }
+h1 { font-size: 1.4rem; margin: 0; }
+h2 { font-size: 1.05rem; margin: 0 0 10px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px; margin-top: 14px; }
+.muted, .note { color: var(--muted); }
+.note { font-size: .9rem; }
+.hidden { display: none !important; }
+a { color: var(--accent); }
+button {
+  font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--fg);
+  padding: 8px 14px; border-radius: 8px; cursor: pointer;
+}
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+button.big { width: 100%; padding: 14px; font-size: 1.15rem; font-weight: 700; border-radius: 12px; }
+button.danger { color: var(--danger); }
+button.call { background: var(--call); border-color: var(--call); color: var(--call-fg); font-weight: 700; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+input[type=text] {
+  font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--fg); width: 100%; max-width: 240px;
+}
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+.msg { min-height: 1.6em; margin-top: 10px; font-size: .95rem; }
+.msg.err { color: var(--danger); }
+.msg.ok { color: var(--ok); }
+.pill { display: inline-block; font-size: .8rem; padding: 1px 10px; border-radius: 999px; border: 1px solid var(--line); }
+.pill.on { border-color: var(--ok); color: var(--ok); }
+.pill.off { border-color: var(--danger); color: var(--danger); }
+
+/* 受付 */
+.choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.choice { text-align: left; padding: 12px 14px; border-radius: 12px; }
+.choice.sel { border: 2px solid var(--accent); background: var(--soft); }
+.choice b { display: block; font-size: 1.1rem; }
+.stepper { display: flex; align-items: center; gap: 16px; }
+.stepper button { width: 52px; height: 52px; font-size: 1.5rem; border-radius: 50%; padding: 0; }
+.stepper .n { font-size: 2rem; font-weight: 700; min-width: 3ch; text-align: center; }
+
+/* 整理券 */
+.ticket { text-align: center; }
+.ticket .label { color: var(--muted); }
+.ticket .num { font-size: 5.5rem; font-weight: 800; line-height: 1.1; letter-spacing: .02em; }
+.ticket .sub { color: var(--muted); }
+.state { margin-top: 14px; padding: 14px; border-radius: 12px; background: var(--soft); font-size: 1.25rem; font-weight: 700; }
+.state.called { background: var(--call); color: var(--call-fg); animation: blink 1s ease-in-out infinite alternate; }
+.state.done { background: transparent; border: 1px solid var(--line); color: var(--muted); font-weight: 600; }
+@keyframes blink { from { opacity: 1; } to { opacity: .65; } }
+.calling { margin-top: 10px; }
+.calling b { font-size: 1.3rem; margin: 0 4px; }
+
+/* 店員 */
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.cols .card { margin-top: 0; }
+.item { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;
+        padding: 8px 0; border-top: 1px solid var(--line); }
+.item:first-of-type { border-top: none; }
+.item .no { font-size: 1.4rem; font-weight: 800; margin-right: 6px; }
+.item .meta { font-size: .85rem; color: var(--muted); }
+.item .row { margin-top: 0; }
+.item.called { background: color-mix(in srgb, var(--call) 18%, transparent); border-radius: 8px; padding: 8px; }
+.qr-box { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+.qr-box .meta { font-size: .85rem; color: var(--muted); word-break: break-all; }
+.toggle {
+  position: relative; width: 64px; height: 36px; border-radius: 18px; padding: 0;
+  background: var(--line); border: none; flex: none;
+}
+.toggle::after {
+  content: ""; position: absolute; top: 4px; left: 4px; width: 28px; height: 28px;
+  border-radius: 50%; background: #fff; transition: left .2s;
+}
+.toggle.on { background: var(--ok); }
+.toggle.on::after { left: 32px; }

@@ -29,6 +29,7 @@
   <ItemGroup>
     <ClInclude Include="main\testsv_api_passkey.h" />
     <ClInclude Include="main\testsv_api_tenant.h" />
+    <ClInclude Include="main\testsv_api_junban.h" />
     <ClInclude Include="main\database.h" />
     <ClInclude Include="main\httplib.h" />
     <ClInclude Include="main\json.hpp" />
@@ -36,6 +37,7 @@
     <ClInclude Include="models\model_passkey.h" />
     <ClInclude Include="models\model_switch.h" />
     <ClInclude Include="models\model_tenant.h" />
+    <ClInclude Include="models\model_junban.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="gen\mysql_dynamic_loading.cpp" />

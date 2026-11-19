@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>整理券</title>
+<link rel="stylesheet" href="junban.css">
+</head>
+<body>
+<main>
+  <div class="muted" id="storeName">読み込み中…</div>
+
+  <div class="card ticket">
+    <div class="label">あなたの番号</div>
+    <div class="num" id="num">—</div>
+    <div class="sub" id="sub"></div>
+    <div class="state" id="state">…</div>
+    <div class="calling muted" id="calling"></div>
+  </div>
+
+  <div class="card" id="soundCard">
+    <div class="row" style="margin-top:0">
+      <button id="sound" class="primary">呼ばれたら音で知らせる</button>
+      <span id="soundState" class="muted"></span>
+    </div>
+    <p class="note">この画面を開いたままにしておくと、呼ばれたときに音と振動でお知らせします
+      （画面を閉じると知らせられません。もう一度 QR コードを読むか、この URL を開けば戻れます）。</p>
+  </div>
+
+  <div class="card" id="cancelCard">
+    <button id="cancel" class="danger">順番待ちをやめる</button>
+    <div id="msg" class="msg"></div>
+  </div>
+  <div id="loadMsg" class="msg"></div>
+</main>
+
+<script src="junban.js"></script>
+<script>
+"use strict";
+
+const TOKEN = PARAMS.get("t") || "";
+let lastStatus = null;
+let audio = null;     // ボタンを押して許可をもらった AudioContext
+
+function beep() {
+  if (!audio) return;
+  const t0 = audio.currentTime;
+  for (let i = 0; i < 3; i++) {
+    const o = audio.createOscillator(), g = audio.createGain();
+    o.type = "sine";
+    o.frequency.value = 880;
+    g.gain.setValueAtTime(0.0001, t0 + i * 0.45);
+    g.gain.exponentialRampToValueAtTime(0.4, t0 + i * 0.45 + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + i * 0.45 + 0.35);
+    o.connect(g).connect(audio.destination);
+    o.start(t0 + i * 0.45);
+    o.stop(t0 + i * 0.45 + 0.4);
+  }
+}
+
+$("sound").onclick = () => {
+  try {
+    audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+    audio.resume();
+    beep();
+    $("soundState").textContent = "オンになりました（いまの音が鳴ります）";
+    $("sound").textContent = "もう一度鳴らしてみる";
+  } catch (e) {
+    $("soundState").textContent = "このブラウザでは音を鳴らせません";
+  }
+};
+
+function notifyCalled() {
+  beep();
+  try { if (navigator.vibrate) navigator.vibrate([400, 200, 400, 200, 400]); } catch (e) {}
+}
+
+const STATE_TEXT = {
+  seated: "ご案内しました。ありがとうございました",
+  skipped: "お呼びしましたが、いらっしゃいませんでした。お店の方にお声がけください",
+  canceled: "順番待ちをやめました",
+};
+
+async function refresh() {
+  if (!TOKEN) {
+    $("state").textContent = "整理券の URL が正しくありません";
+    return;
+  }
+  const r = await api("ticket", { token: TOKEN });
+  if (r.status !== "success") {
+    showMsg("loadMsg", msgOf(r), "err");
+    return;
+  }
+  showMsg("loadMsg", "");
+  const t = r.ticket;
+  $("storeName").textContent = r.store.name;
+  $("num").textContent = t.number;
+  $("sub").textContent = (t.seat_name ? t.seat_name + "・" : "") + t.people + " 名・" + hhmm(t.created_at) + " 受付";
+
+  const st = $("state");
+  let title = t.number + " 番";
+  if (!r.today) {
+    st.className = "state done";
+    st.textContent = "前の営業日の整理券です";
+  } else if (t.status === "waiting") {
+    st.className = "state";
+    st.textContent = t.ahead === 0 ? "次にお呼びします" : "あと " + t.ahead + " 組でお呼びします";
+    title += "（あと " + t.ahead + " 組）";
+  } else if (t.status === "called") {
+    st.className = "state called";
+    st.textContent = "お呼びしています！お店の入口へお越しください";
+    title = "【お呼び出し】" + title;
+  } else {
+    st.className = "state done";
+    st.textContent = STATE_TEXT[t.status] || t.status;
+  }
+  document.title = title + " - " + r.store.name;
+
+  const calling = r.store.calling;
+  $("calling").textContent = "";
+  if (r.today && calling.length) {
+    $("calling").append("いまお呼びしている番号:");
+    for (const n of calling) $("calling").append(el("b", { text: n }));
+  }
+
+  const active = r.today && (t.status === "waiting" || t.status === "called");
+  $("cancelCard").classList.toggle("hidden", !active);
+  $("soundCard").classList.toggle("hidden", !active);
+
+  if (t.status === "called" && lastStatus !== null && lastStatus !== "called") notifyCalled();
+  lastStatus = t.status;
+}
+
+$("cancel").onclick = async () => {
+  if (!confirm("順番待ちをやめますか？（取り消すと元に戻せません）")) return;
+  const r = await api("cancel", { token: TOKEN });
+  if (r.status !== "success") return showMsg("msg", msgOf(r), "err");
+  showMsg("msg", "");
+  await refresh();
+};
+
+refresh();
+// 開いている間は 5 秒ごと、裏にある間も 15 秒ごとに確かめる（呼ばれたら音を鳴らすため）
+poll(refresh, 5000, 15000);
+</script>
+</body>
+</html>
