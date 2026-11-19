@@ -11,17 +11,16 @@
 - ローカル（SQLite）で確かめたこと
   - `tools/junban_check.py` の 54 手順＋同時受付 12 件の応答が Python と C++ で完全一致。
   - 3 つのページを Chrome ヘッドレスで描画し、表示を確認（音・振動とボタン操作は未確認）。
-- **Render にはまだ出していない。**
+- **Render に出した（2026-11-19）**: junban-cpp / junban-python（オレゴン）、TiDB は junban 用の別クラスタの
+  DB `junban`。環境変数は Render API で設定（API キーは ~/.claude/keys/render_api_key、控えは password リポ）。
+- 本番で tools/junban_check.py（mysql）が両実装一致。最初は 12 人同時受付で busy が出た →
+  採番を INSERT … SELECT MAX+1 の 1 文＋待って最大 10 回振り直しにして解消。
 
 ## 次にやること
 
-1. **Render に Blueprint で 2 サービスを作る**（ブラウザ操作が要るのでユーザー）。
-   New + → Blueprint → yomei-o/junban_cpp。サービス名は `junban-python` / `junban-cpp`。
-2. **TiDB は render_parity_cpp と別の DB にする**のがよい（account・tenant の表が同じ名前なので、
-   同じ `test` DB だとログインやテナントが共有される）。TiDB で `CREATE DATABASE junban;` を 1 回実行し、
-   Render の env `DB_NAME=junban`。他の env は render_parity と同じ（password リポの README 参照）。
-3. 実機（スマホ）で受付 → 呼出 → 音と振動が鳴るかを確かめる。
-4. Render を東京に近づけたいならシンガポール（`region: singapore`）で作る（作成後は変えられない）。
+1. 実機で通す: パスキーでログイン（最初の人が全体の管理者）→ お店を作る → 自分で参加（最初の人はお店の管理者）
+   → staff.html で席の種類を作る → スマホで受付 QR → 呼出 → 音と振動が鳴るか。
+2. Render を東京に近づけたいならシンガポール（`region: singapore`）で作り直す（作成後は変えられない）。
 
 ## あとでやるかもしれないこと（MVP の外）
 

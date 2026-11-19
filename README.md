@@ -5,6 +5,16 @@
 土台は [yomei-o/render_parity_cpp](https://github.com/yomei-o/render_parity_cpp)（パスキーのログインとテナント）。
 Python/C++ の**機能パリティ**を保つのが方針（速度は別）。
 
+## 動いているサーバ（Render 無料枠＋TiDB Cloud の DB `junban`）
+
+| 実装 | ログイン・お店の管理 |
+|---|---|
+| C++（cpp-httplib, Docker） | https://junban-cpp.onrender.com/html/index.html |
+| Python（FastAPI） | https://junban-python.onrender.com/html/index.html |
+
+2 つは同じ TiDB を使うので、どちらから操作しても同じお店・同じ整理券が見える。
+無料枠なので 15 分アクセスが無いと止まり、次の最初のアクセスは起動待ちになる（C++ が速い）。
+
 ## 使い方
 
 | 誰が | ページ | やること |
@@ -35,7 +45,10 @@ Python/C++ の**機能パリティ**を保つのが方針（速度は別）。
 ### 両実装が同じ応答を返すかの検査
 
 `tools/junban_check.py` は SQLite で動かしたサーバに同じ手順（54 手順＋同時受付 12 件）を流し、
-応答を正規化して出す。Python 版と C++ 版の出力を `diff` して一致を確かめる（2026-11-19 一致）。
+応答を正規化して出す。Python 版と C++ 版の出力を `diff` して一致を確かめる。
+DB に `mysql` を渡すと本番の TiDB に検査用の店を作って流し、最後に消す。3 つ目の URL を渡すと
+2 つのサーバに同時に受付して番号が重ならないかも見る。
+2026-11-19: SQLite・本番 TiDB とも一致、本番で 12 人同時（片方のサーバ／両方のサーバ）も全員受付・重複なし。
 
 ## 構成
 
